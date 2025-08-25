@@ -1,0 +1,7 @@
+{
+  "name": "Copy of Bilingual AI Assistant",
+  "description": "A web-based AI assistant that understands and speaks Sinhala and English, powered by Google Gemini. It can chat, search the web, generate images, and perform simple tasks.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
