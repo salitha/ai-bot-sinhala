@@ -165,47 +165,86 @@ const App: React.FC = () => {
     }
 
     setIsLoading(false);
-    setStatus('Online');
-  }, [speak]);
-
-  const handleListen = useCallback(() => {
+    setStatus(isListening ? 'Listening continuously...' : 'Online');
+  }, [speak, isListening]);
+  
+  // Effect to manage the speech recognition lifecycle for continuous listening
+  useEffect(() => {
     if (!SpeechRecognition) {
-      setStatus('Speech recognition is not supported in this browser.');
+      console.warn("Speech recognition is not supported in this browser.");
       return;
     }
 
-    if (isListening) {
-      recognitionRef.current?.stop();
+    if (!isListening) {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+      }
       return;
     }
 
-    recognitionRef.current = new SpeechRecognition();
-    recognitionRef.current.lang = 'si-LK';
-    recognitionRef.current.interimResults = false;
+    const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
 
-    recognitionRef.current.onstart = () => {
-      setIsListening(true);
-      setStatus('Listening...');
+    recognition.lang = 'si-LK';
+    recognition.continuous = false; // Manually handle continuous listening for better reliability.
+    recognition.interimResults = false;
+
+    recognition.onstart = () => {
+      setStatus('Listening continuously...');
     };
 
-    recognitionRef.current.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      setUserInput(transcript);
-      handleSendMessage(transcript);
+    recognition.onresult = (event) => {
+      const transcript = event.results[event.results.length - 1][0].transcript.trim();
+      if (event.results[event.results.length - 1].isFinal) {
+        setStatus(`Heard: "${transcript}"`);
+        handleSendMessage(transcript);
+      }
     };
 
-    recognitionRef.current.onerror = (event) => {
+    recognition.onerror = (event) => {
       console.error('Speech recognition error:', event.error);
-      setStatus(`Error: ${event.error}`);
+      
+      // The 'no-speech' error is common and expected.
+      // We don't want to stop the service for this, just let it restart via the `onend` handler.
+      if (event.error === 'no-speech') {
+        return;
+      }
+      
+      let errorMessage = event.error;
+      if (event.error === 'not-allowed') {
+        errorMessage = "Microphone access denied. Please enable it in your browser settings.";
+      }
+      
+      setStatus(`Mic Error: ${errorMessage}`);
+      setIsListening(false); // Turn off on critical errors
     };
 
-    recognitionRef.current.onend = () => {
-      setIsListening(false);
-      setStatus('Online');
+    recognition.onend = () => {
+      // If recognition ends but we're still supposed to be listening (i.e., not a manual stop), restart it.
+      // This creates the continuous loop.
+      if (recognitionRef.current) {
+        recognitionRef.current.start();
+      } else {
+        setStatus('Online');
+      }
     };
-    
-    recognitionRef.current.start();
+
+    recognition.start();
+
+    // Cleanup function: stop recognition when component unmounts or isListening becomes false
+    return () => {
+      if (recognitionRef.current) {
+        const rec = recognitionRef.current;
+        recognitionRef.current = null;
+        rec.stop();
+      }
+    };
   }, [isListening, handleSendMessage]);
+
+  const handleListenToggle = () => {
+    setIsListening(prev => !prev);
+  };
 
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-white font-sans">
@@ -240,9 +279,10 @@ const App: React.FC = () => {
             />
             <button
               type="button"
-              onClick={handleListen}
+              onClick={handleListenToggle}
               className={`p-3 rounded-full transition-colors ${isListening ? 'bg-red-600 animate-pulse' : 'bg-gray-600 hover:bg-gray-500'} disabled:opacity-50`}
               disabled={isLoading}
+              aria-label={isListening ? 'Stop listening' : 'Start listening'}
             >
               <MicrophoneIcon className="w-6 h-6 text-white" />
             </button>
@@ -250,6 +290,7 @@ const App: React.FC = () => {
               type="submit"
               className="p-3 bg-blue-600 rounded-full hover:bg-blue-500 transition-colors disabled:opacity-50 disabled:bg-blue-800"
               disabled={isLoading || !userInput.trim()}
+              aria-label="Send message"
             >
               <SendIcon className="w-6 h-6 text-white" />
             </button>
