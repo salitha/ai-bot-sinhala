@@ -17,3 +17,7 @@ export type Message = {
   imageUrl?: string;
   searchResults?: SearchResult[];
 };
+
+export type User = {
+  username: string;
+};

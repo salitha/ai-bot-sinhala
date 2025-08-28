@@ -1,9 +1,11 @@
+
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import type { Message } from './types';
+import type { Message, User } from './types';
 import { MessageRole } from './types';
-import { sendMessageToGemini, searchWithGemini, generateImageWithGemini } from './services/geminiService';
+import { getAssistantResponse } from './services/geminiService';
 import MessageComponent from './components/Message';
-import { SendIcon, MicrophoneIcon } from './components/Icons';
+import { SendIcon, MicrophoneIcon, LogoutIcon, SpeakerOnIcon, SpeakerOffIcon } from './components/Icons';
+import Auth from './components/Auth';
 
 // --- Type definitions for Web Speech API ---
 // These are not included in standard TypeScript DOM library types
@@ -63,20 +65,57 @@ declare global {
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 const App: React.FC = () => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 'init',
-      role: MessageRole.MODEL,
-      text: "Hello! I'm Sahaya, your bilingual AI assistant. How can I help you today? You can ask me to search, generate images, or just chat.",
-    }
-  ]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [userInput, setUserInput] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [status, setStatus] = useState<string>('Online');
+  const [status, setStatus] = useState<string>('සබැඳි ඇත');
   const [isListening, setIsListening] = useState<boolean>(false);
+  const [isSpeakingEnabled, setIsSpeakingEnabled] = useState<boolean>(true);
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [ttsWarningShown, setTtsWarningShown] = useState<boolean>(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  
+  // Check for logged-in user on component mount
+  useEffect(() => {
+    const loggedInUserJson = localStorage.getItem('currentUser');
+    if (loggedInUserJson) {
+      try {
+        const user = JSON.parse(loggedInUserJson);
+        setCurrentUser(user);
+      } catch (error) {
+        console.error("Failed to parse user from localStorage", error);
+        localStorage.removeItem('currentUser');
+      }
+    }
+  }, []);
 
+  // Set initial message when user logs in
+  useEffect(() => {
+    if (currentUser) {
+      setMessages([
+        {
+          id: 'init',
+          role: MessageRole.MODEL,
+          text: `ආයුබෝවන් ${currentUser.username}! මම මදු, ඔබේ AI සහායක. අද මම ඔබට උදව් කළ හැක්කේ කෙසේද?`,
+        }
+      ]);
+    }
+  }, [currentUser]);
+  
+  // Load speech synthesis voices
+  useEffect(() => {
+    const loadVoices = () => {
+        setVoices(window.speechSynthesis.getVoices());
+    };
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    return () => {
+        window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, []);
+  
   const scrollToBottom = () => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -86,20 +125,45 @@ const App: React.FC = () => {
   }, [messages]);
 
   const speak = useCallback((text: string) => {
-    if ('speechSynthesis' in window) {
-      const utterance = new SpeechSynthesisUtterance(text);
-      
-      const voices = window.speechSynthesis.getVoices();
-      const sinhalaVoice = voices.find(voice => voice.lang === 'si-LK');
-      
-      if (sinhalaVoice) {
-        utterance.voice = sinhalaVoice;
-      }
-      utterance.lang = 'si-LK';
-      
-      window.speechSynthesis.speak(utterance);
+    if (!isSpeakingEnabled || !('speechSynthesis' in window)) {
+      return;
     }
-  }, []);
+
+    window.speechSynthesis.cancel();
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    const targetLang = 'si-LK';
+    
+    let selectedVoice = voices.find(voice => voice.lang === targetLang);
+    if (!selectedVoice) {
+      selectedVoice = voices.find(voice => voice.lang.startsWith('si'));
+    }
+
+    if (selectedVoice) {
+      utterance.voice = selectedVoice;
+      utterance.lang = targetLang;
+      window.speechSynthesis.speak(utterance);
+    } else if (!ttsWarningShown) {
+        const warningMessage: Message = {
+            id: 'tts-warning',
+            role: MessageRole.SYSTEM,
+            text: "කථන ප්‍රතිදානය සඳහා සිංහල භාෂා පැකේජයක් ඔබගේ උපාංගයේ ස්ථාපනය කර නොමැති බව පෙනේ. පිළිතුරු පෙළ ලෙස දිස්වනු ඇත."
+        };
+        setMessages(prev => [...prev, warningMessage]);
+        setTtsWarningShown(true);
+    }
+  }, [voices, isSpeakingEnabled, ttsWarningShown]);
+  
+  const handleLogin = (user: User) => {
+    localStorage.setItem('currentUser', JSON.stringify(user));
+    setCurrentUser(user);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('currentUser');
+    setCurrentUser(null);
+    setMessages([]); // Clear messages on logout
+  };
 
   const handleSendMessage = useCallback(async (text: string) => {
     if (!text.trim()) return;
@@ -108,73 +172,57 @@ const App: React.FC = () => {
     setMessages(prev => [...prev, userMessage]);
     setUserInput('');
     setIsLoading(true);
+    setStatus('සිතමින්...');
 
-    let modelResponse: Omit<Message, 'id' | 'role'> | null = null;
-    
-    // Command parsing
-    const imageMatch = text.match(/^(?:generate|create|make) an? image of (.+)/i);
-    const openMatch = text.match(/^open (.+)/i);
-    const timeMatch = text.match(/what time is it|date and time/i);
-    const searchMatch = text.match(/^(what is|who is|latest news about|search for)/i);
+    const history = messages
+      .filter(m => (m.role === MessageRole.USER || m.role === MessageRole.MODEL) && m.text)
+      .map(m => ({
+        role: m.role,
+        parts: [{ text: m.text! }],
+      }));
 
-    if (imageMatch) {
-      setStatus(`Generating image: ${imageMatch[1]}`);
-      const imageUrl = await generateImageWithGemini(imageMatch[1]);
-      if (imageUrl) {
-        modelResponse = { text: `Here is an image of ${imageMatch[1]}`, imageUrl: imageUrl };
-      } else {
-        modelResponse = { text: "I'm sorry, I couldn't generate the image." };
-      }
-    } else if (openMatch) {
-        let url = openMatch[1].trim();
-        if (!url.startsWith('http')) {
-            url = `https://${url}`;
-        }
-        window.open(url, '_blank');
-        modelResponse = { text: `Opening ${openMatch[1]}...` };
-        setMessages(prev => [...prev, {
-            id: Date.now().toString() + '-sys',
-            role: MessageRole.SYSTEM,
-            text: `Navigating to ${url}`
-        }]);
+    try {
+        // @ts-ignore
+        const response = await getAssistantResponse(text, history);
 
-    } else if (timeMatch) {
-      const now = new Date();
-      const responseText = `The current date and time is: ${now.toLocaleString()}`;
-      modelResponse = { text: responseText };
-    } else if (searchMatch) {
-      setStatus(`Searching for: ${text}`);
-      const { text: responseText, results } = await searchWithGemini(text);
-      modelResponse = { text: responseText, searchResults: results };
-    } else {
-      setStatus('Thinking...');
-      const responseText = await sendMessageToGemini(text);
-      modelResponse = { text: responseText };
-    }
-    
-    if (modelResponse) {
         const finalModelMessage: Message = { 
             id: Date.now().toString() + '-model',
             role: MessageRole.MODEL,
-            ...modelResponse
+            text: response.text,
+            imageUrl: response.imageUrl,
+            searchResults: response.searchResults,
         };
+
         setMessages(prev => [...prev, finalModelMessage]);
         if (finalModelMessage.text) {
           speak(finalModelMessage.text);
         }
-    }
 
-    setIsLoading(false);
-    setStatus(isListening ? 'Listening continuously...' : 'Online');
-  }, [speak, isListening]);
+    } catch (error) {
+        console.error("Error with assistant:", error);
+        const errorMessage: Message = {
+            id: Date.now().toString() + '-model',
+            role: MessageRole.MODEL,
+            text: "මට කණගාටුයි, දෝෂයක් ඇතිවිය. කරුණාකර නැවත උත්සාහ කරන්න."
+        };
+        setMessages(prev => [...prev, errorMessage]);
+        if (errorMessage.text) {
+            speak(errorMessage.text);
+        }
+    } finally {
+        setIsLoading(false);
+        setStatus('සබැඳි ඇත');
+    }
+  }, [messages, speak]);
   
-  // Effect to manage the speech recognition lifecycle for continuous listening
+  // Effect to manage the speech recognition lifecycle for "press-to-talk"
   useEffect(() => {
     if (!SpeechRecognition) {
       console.warn("Speech recognition is not supported in this browser.");
       return;
     }
 
+    // If not listening, ensure any existing recognition is stopped.
     if (!isListening) {
       if (recognitionRef.current) {
         recognitionRef.current.stop();
@@ -182,74 +230,96 @@ const App: React.FC = () => {
       }
       return;
     }
-
+    
+    // Start a new recognition session
     const recognition = new SpeechRecognition();
     recognitionRef.current = recognition;
 
     recognition.lang = 'si-LK';
-    recognition.continuous = false; // Manually handle continuous listening for better reliability.
-    recognition.interimResults = false;
+    recognition.continuous = false; // Stop after first utterance
+    recognition.interimResults = false; // Only final results
 
     recognition.onstart = () => {
-      setStatus('Listening continuously...');
+      setStatus('මම අහගෙන ඉන්නේ...');
     };
 
     recognition.onresult = (event) => {
-      const transcript = event.results[event.results.length - 1][0].transcript.trim();
-      if (event.results[event.results.length - 1].isFinal) {
-        setStatus(`Heard: "${transcript}"`);
-        handleSendMessage(transcript);
+      const transcript = event.results[0][0].transcript;
+      if (transcript) {
+         setStatus(`ඇසුණි: "${transcript}"`);
+         handleSendMessage(transcript);
       }
+      setIsListening(false); // Turn off listening after getting a result
     };
 
     recognition.onerror = (event) => {
-      console.error('Speech recognition error:', event.error);
-      
-      // The 'no-speech' error is common and expected.
-      // We don't want to stop the service for this, just let it restart via the `onend` handler.
-      if (event.error === 'no-speech') {
-        return;
+      console.error('Speech recognition error:', event.error, event.message);
+      let errorMessage = '';
+      switch (event.error) {
+        case 'no-speech':
+          errorMessage = "කථනයක් හඳුනා නොගත්තේය. නැවත උත්සාහ කරන්න...";
+          break;
+        case 'network':
+          errorMessage = "ජාල දෝෂයක්. කරුණාකර ඔබගේ සම්බන්ධතාවය පරීක්ෂා කර නැවත උත්සාහ කරන්න.";
+          break;
+        case 'audio-capture':
+          errorMessage = "මයික්‍රෆෝනයෙන් ශ්‍රව්‍ය ග්‍රහණය කර ගැනීමට නොහැකි විය.";
+          break;
+        case 'not-allowed':
+          errorMessage = "මයික්‍රෆෝන ප්‍රවේශය ප්‍රතික්ෂේප විය.";
+          break;
+        default:
+          errorMessage = "කථනය හඳුනාගැනීමේ දෝෂයක් ඇතිවිය.";
+          break;
       }
-      
-      let errorMessage = event.error;
-      if (event.error === 'not-allowed') {
-        errorMessage = "Microphone access denied. Please enable it in your browser settings.";
-      }
-      
-      setStatus(`Mic Error: ${errorMessage}`);
-      setIsListening(false); // Turn off on critical errors
+      setStatus(errorMessage);
+      setIsListening(false);
     };
 
     recognition.onend = () => {
-      // If recognition ends but we're still supposed to be listening (i.e., not a manual stop), restart it.
-      // This creates the continuous loop.
-      if (recognitionRef.current) {
-        recognitionRef.current.start();
-      } else {
-        setStatus('Online');
+      if (isListening) { // If it ends prematurely
+        setIsListening(false);
+      }
+      // Don't update status here if loading, as handleSendMessage will manage it.
+      if (!isLoading) {
+         setStatus('සබැඳි ඇත');
       }
     };
-
+    
     recognition.start();
-
-    // Cleanup function: stop recognition when component unmounts or isListening becomes false
+    
+    // Cleanup function
     return () => {
       if (recognitionRef.current) {
-        const rec = recognitionRef.current;
+        recognitionRef.current.stop();
         recognitionRef.current = null;
-        rec.stop();
       }
     };
-  }, [isListening, handleSendMessage]);
+  }, [isListening, handleSendMessage, isLoading]);
 
   const handleListenToggle = () => {
+    if (isLoading) return;
     setIsListening(prev => !prev);
   };
 
+  if (!currentUser) {
+    return <Auth onLogin={handleLogin} />;
+  }
+
   return (
     <div className="flex flex-col h-screen bg-gray-900 text-white font-sans">
-      <header className="p-4 border-b border-gray-700 shadow-md bg-gray-800">
-        <h1 className="text-xl font-bold text-center">Bilingual AI Assistant (Sahaya)</h1>
+      <header className="p-4 border-b border-gray-700 shadow-md bg-gray-800 flex items-center justify-between">
+        <h1 className="text-xl font-bold">AI සහායක (මදු)</h1>
+        <div className="flex items-center gap-4">
+            <span className="text-sm text-gray-300 hidden sm:inline">ආයුබෝවන්, {currentUser.username}!</span>
+            <button
+                onClick={handleLogout}
+                className="p-2 rounded-full transition-colors bg-gray-700 hover:bg-red-500"
+                aria-label="Logout"
+            >
+                <LogoutIcon className="w-5 h-5 text-white" />
+            </button>
+        </div>
       </header>
 
       <main className="flex-1 p-4 overflow-y-auto">
@@ -273,7 +343,7 @@ const App: React.FC = () => {
               type="text"
               value={userInput}
               onChange={(e) => setUserInput(e.target.value)}
-              placeholder="Type your message or press the mic to talk..."
+              placeholder='ඔබේ පණිවිඩය ටයිප් කරන්න නැතහොත් කතා කිරීමට මයික්‍රෆෝනය ඔබන්න...'
               className="flex-1 p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
               disabled={isLoading}
             />
@@ -287,6 +357,15 @@ const App: React.FC = () => {
               <MicrophoneIcon className="w-6 h-6 text-white" />
             </button>
             <button
+              type="button"
+              onClick={() => setIsSpeakingEnabled(prev => !prev)}
+              className={`p-3 rounded-full transition-colors ${isSpeakingEnabled ? 'bg-blue-600 hover:bg-blue-500' : 'bg-gray-600 hover:bg-gray-500'} disabled:opacity-50`}
+              disabled={isLoading}
+              aria-label={isSpeakingEnabled ? 'Disable voice output' : 'Enable voice output'}
+            >
+              {isSpeakingEnabled ? <SpeakerOnIcon className="w-6 h-6 text-white" /> : <SpeakerOffIcon className="w-6 h-6 text-white" />}
+            </button>
+            <button
               type="submit"
               className="p-3 bg-blue-600 rounded-full hover:bg-blue-500 transition-colors disabled:opacity-50 disabled:bg-blue-800"
               disabled={isLoading || !userInput.trim()}
@@ -295,7 +374,7 @@ const App: React.FC = () => {
               <SendIcon className="w-6 h-6 text-white" />
             </button>
           </form>
-          <div className="text-center text-sm text-gray-400 pt-2">{status}</div>
+          <div className="text-center text-sm text-gray-400 pt-2 h-5">{status}</div>
         </div>
       </footer>
     </div>
