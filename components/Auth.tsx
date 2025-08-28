@@ -62,29 +62,31 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
             ඔබේ AI සහායක
           </p>
         </div>
-        <form className="mt-8 space-y-6">
-          <div className="rounded-md shadow-sm -space-y-px">
+        <form className="mt-8 space-y-6" onSubmit={(e) => e.preventDefault()}>
+          <div className="space-y-4">
             <div>
+              <label htmlFor="username" className="sr-only">පරිශීලක නාමය</label>
               <input
                 id="username"
                 name="username"
                 type="text"
                 autoComplete="username"
                 required
-                className="appearance-none rounded-none relative block w-full px-3 py-3 border border-gray-700 bg-gray-900 placeholder-gray-500 text-white rounded-t-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                className="appearance-none relative block w-full px-4 py-3 border border-gray-700 bg-gray-900 placeholder-gray-500 text-white rounded-lg focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                 placeholder="පරිශීලක නාමය"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
               />
             </div>
             <div>
+              <label htmlFor="password" className="sr-only">මුරපදය</label>
               <input
                 id="password"
                 name="password"
                 type="password"
                 autoComplete="current-password"
                 required
-                className="appearance-none rounded-none relative block w-full px-3 py-3 border border-gray-700 bg-gray-900 placeholder-gray-500 text-white rounded-b-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 focus:z-10 sm:text-sm"
+                className="appearance-none relative block w-full px-4 py-3 border border-gray-700 bg-gray-900 placeholder-gray-500 text-white rounded-lg focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                 placeholder="මුරපදය"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -94,7 +96,7 @@ const Auth: React.FC<AuthProps> = ({ onLogin }) => {
 
           {error && <p className="mt-2 text-center text-sm text-red-400">{error}</p>}
 
-          <div className="flex items-center justify-between gap-4 mt-6">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mt-6">
             <button
               type="submit"
               onClick={handleLogin}

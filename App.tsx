@@ -307,11 +307,19 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-900 text-white font-sans">
-      <header className="p-4 border-b border-gray-700 shadow-md bg-gray-800 flex items-center justify-between">
+    <div className="flex flex-col h-dvh bg-gray-900 text-white font-sans">
+      <header className="p-4 border-b border-gray-700 shadow-md bg-gray-800/80 backdrop-blur-sm flex items-center justify-between">
         <h1 className="text-xl font-bold">AI සහායක (මදු)</h1>
         <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-300 hidden sm:inline">ආයුබෝවන්, {currentUser.username}!</span>
+            <button
+              type="button"
+              onClick={() => setIsSpeakingEnabled(prev => !prev)}
+              className={`p-2 rounded-full transition-colors ${isSpeakingEnabled ? 'bg-blue-600 hover:bg-blue-500' : 'bg-gray-700 hover:bg-gray-600'}`}
+              aria-label={isSpeakingEnabled ? 'Disable voice output' : 'Enable voice output'}
+            >
+              {isSpeakingEnabled ? <SpeakerOnIcon className="w-5 h-5 text-white" /> : <SpeakerOffIcon className="w-5 h-5 text-white" />}
+            </button>
+            <span className="text-sm text-gray-300 hidden sm:inline border-l border-gray-600 pl-4 ml-2">ආයුබෝවන්, {currentUser.username}!</span>
             <button
                 onClick={handleLogout}
                 className="p-2 rounded-full transition-colors bg-gray-700 hover:bg-red-500"
@@ -330,10 +338,10 @@ const App: React.FC = () => {
         </div>
       </main>
 
-      <footer className="p-4 border-t border-gray-700 bg-gray-800">
+      <footer className="p-4 border-t border-gray-700 bg-gray-800/80 backdrop-blur-sm">
         <div className="max-w-4xl mx-auto">
           <form
-            className="flex items-center gap-2"
+            className="flex items-center gap-3"
             onSubmit={(e) => {
               e.preventDefault();
               handleSendMessage(userInput);
@@ -343,8 +351,8 @@ const App: React.FC = () => {
               type="text"
               value={userInput}
               onChange={(e) => setUserInput(e.target.value)}
-              placeholder='ඔබේ පණිවිඩය ටයිප් කරන්න නැතහොත් කතා කිරීමට මයික්‍රෆෝනය ඔබන්න...'
-              className="flex-1 p-3 bg-gray-700 border border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              placeholder='ඔබේ පණිවිඩය ටයිප් කරන්න...'
+              className="flex-1 p-3 px-5 bg-gray-700 border border-transparent rounded-full focus:ring-2 focus:ring-blue-500 focus:outline-none transition-shadow"
               disabled={isLoading}
             />
             <button
@@ -355,15 +363,6 @@ const App: React.FC = () => {
               aria-label={isListening ? 'Stop listening' : 'Start listening'}
             >
               <MicrophoneIcon className="w-6 h-6 text-white" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsSpeakingEnabled(prev => !prev)}
-              className={`p-3 rounded-full transition-colors ${isSpeakingEnabled ? 'bg-blue-600 hover:bg-blue-500' : 'bg-gray-600 hover:bg-gray-500'} disabled:opacity-50`}
-              disabled={isLoading}
-              aria-label={isSpeakingEnabled ? 'Disable voice output' : 'Enable voice output'}
-            >
-              {isSpeakingEnabled ? <SpeakerOnIcon className="w-6 h-6 text-white" /> : <SpeakerOffIcon className="w-6 h-6 text-white" />}
             </button>
             <button
               type="submit"
